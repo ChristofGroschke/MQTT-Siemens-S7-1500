@@ -1,0 +1,175 @@
+﻿FUNCTION "mqttAvailable" : Bool
+TITLE = 'MQTT mqttAvailable Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+
+BEGIN
+	#mqttAvailable := ("mqttData".pRead <> "mqttData".pRec) OR "mqttData".RecBufFull;
+END_FUNCTION
+(**************************************************************)
+
+FUNCTION "mqttReadByte" : Byte
+TITLE = 'MQTT mqttReadByte Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+
+BEGIN
+	#mqttReadByte := "mqttData".tcpRecBuf["mqttData".pRead];
+	"mqttData".pRead := "mqttData".pRead + 1;
+	IF ("mqttData".pRead >= "mqttGlobals".TCP_RECVBUFFERSIZE) THEN
+	  "mqttData".pRead := 0;
+	END_IF;
+	"mqttData".RecBufFull := false;
+END_FUNCTION
+(**************************************************************)
+
+FUNCTION "mqttReadByteToBuf" : Int
+TITLE = 'MQTT mqttReadByteToBuf Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+   VAR_INPUT 
+      pos : Int;
+   END_VAR
+
+   VAR_TEMP 
+      cur_index : Int;
+      readed : Byte;
+   END_VAR
+
+
+BEGIN
+	#cur_index := #pos;
+	#readed := "mqttReadByte"();
+	"mqttData".buffer[#cur_index] := #readed;
+	#cur_index := #cur_index + 1;
+	#mqttReadByteToBuf := #cur_index;
+END_FUNCTION
+(**************************************************************)
+
+FUNCTION_BLOCK "mqttPacketReader"
+TITLE = 'MQTT mqttPacketReader Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+   VAR_OUTPUT 
+      xDone : Bool;
+      result : Int;
+      lengthLength : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      iBegin : Bool;
+   END_VAR
+
+   VAR 
+      _len : Int;
+      isPublish : Bool;
+      multiplier : DInt;
+      length : DInt;
+      digit : Byte;
+      start : Int;
+      State : Int;
+      oldState : Int;
+      previousTime : Time;
+   END_VAR
+
+
+BEGIN
+	CASE (#State) OF
+	  -1: // Alternative to original blocking call
+	    IF (("mqttData".runTime - #previousTime) >= "mqttGlobals".MQTT_SOCKET_TIMEOUT) THEN
+	      #xDone := true;
+	      #result := 0;
+	      #State := 0;
+	    ELSIF "mqttAvailable"() THEN
+	      #State := #oldState;
+	    END_IF;
+	  0: // Wait for Start
+	    #oldState := 0;
+	    IF (#iBegin) THEN
+	      #iBegin := false;
+	      #xDone := false;
+	      #_len := 0;
+	      #State := 1;
+	    END_IF;
+	  1:    // Getting first byte
+	    #oldState := 1;
+	    IF "mqttAvailable"() THEN
+	      #_len := "mqttReadByteToBuf"(pos := #_len);
+	      #isPublish := BYTE_TO_INT("mqttData".buffer[0] AND B#16#F0) = "mqttGlobals".MQTTPUBLISH;
+	      #multiplier := 1;
+	      #length := 0;
+	      #digit := B#16#00;
+	      #start := 0;
+	      #State := 2;
+	    ELSE
+	      #previousTime := "mqttData".runTime;
+	      #State := -1;
+	    END_IF;
+	  2: // do..while((digit & 128) != 0) loop equivalent
+	    #oldState := 2;
+	    IF "mqttAvailable"() THEN
+	      #digit := "mqttReadByte"();
+	      "mqttData".buffer[#_len] := #digit;
+	      #_len := #_len + 1;
+	      #length := #length + (BYTE_TO_DINT(#digit AND B#16#7F) * #multiplier);
+	      #multiplier := #multiplier * 128;
+	      IF (#digit AND B#16#80) = B#16#00 THEN
+	        #lengthLength := #_len - 1;
+	        IF (#isPublish) THEN
+	          #State := 3;
+	        ELSE
+	          #State := 5;
+	        END_IF;
+	      END_IF;
+	    ELSE
+	      #previousTime := "mqttData".runTime;
+	      #State := -1;
+	    END_IF;
+	  3:    // First Publish Byte
+	    #oldState := 3;
+	    IF "mqttAvailable"() THEN
+	      #_len := "mqttReadByteToBuf"(pos := #_len);
+	      #State := 4;
+	    ELSE
+	      #previousTime := "mqttData".runTime;
+	      #State := -1;
+	    END_IF;
+	  4:    // Second Publish Byte
+	    #oldState := 4;
+	    IF "mqttAvailable"() THEN
+	      #_len := "mqttReadByteToBuf"(pos := #_len);
+	      #start := 2;
+	      #State := 5;
+	    ELSE
+	      #previousTime := "mqttData".runTime;
+	      #State := -1;
+	    END_IF;
+	  5:    // Read rest of Packet (for loop replacement)
+	    #oldState := 5;
+	    //loop exit
+	    IF (#start = #length) THEN
+	      IF (#_len > "mqttGlobals".TCP_MAXRECVSIZE) THEN
+	        #_len := 0; // just drop packet if too long
+	      END_IF;
+	      #xDone := true;
+	      #result := #_len;
+	      #State := 0;
+	    ELSIF "mqttAvailable"() THEN
+	      #digit := "mqttReadByte"();
+	      IF (#_len < "mqttGlobals".TCP_MAXRECVSIZE) THEN
+	        "mqttData".buffer[#_len] := #digit;
+	      END_IF;
+	      #_len := #_len + 1;
+	      //loop
+	      #start := #start + 1;
+	    ELSE
+	      #previousTime := "mqttData".runTime;
+	      #State := -1;
+	    END_IF;
+	END_CASE;
+END_FUNCTION_BLOCK
+(**************************************************************)

@@ -1,0 +1,20 @@
+﻿(*
+    TODO:
+    - connect method: handle reset of message ID according to cleanSessio flag
+
+*)
+TYPE "UDT_STRUCTANYPTR"
+TITLE = 'DISSASEMBLED ANYPOINTER'
+VERSION : 0.1
+   STRUCT
+      S7Code : Byte;   // Code for S7 = 0x10
+      DataType : Byte;   // Code for data type = 0x02 = byte
+      Length : Int;   // Repetition factor = Send/receive length
+      DBNumber : Int;   // Data block Number
+      MemoryArea : Byte;   // Specified memory area = 0x84 = data block
+      ByteAddressMSB : Byte;   // Byte address most significant bits
+      ByteAddressLSB : Word;   // Byte address least significant bits
+   END_STRUCT;
+
+END_TYPE
+

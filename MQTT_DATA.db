@@ -1,0 +1,37 @@
+﻿DATA_BLOCK "mqttData"
+TITLE = 'MQTT DATABLOCK'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 0.1
+NON_RETAIN
+   STRUCT 
+      tcpRecBuf : Array[0..8192] of Byte;
+      pRec : Int;   // Next incoming byte pos
+      pRead : Int;   // Next byte to process
+      RecBufFull : Bool;   // Overflow TCP Outgoing
+      tcpSendBuf : Array[0..4096] of Byte;
+      reqSend : Bool;
+      sendSize : Int;
+      buffer : Array[0..4096] of Byte;
+      nextMsgId : Int;
+      _state : Int;
+      packet_state : Int;
+      pingOutstanding : Bool;
+      lastInActivity : Time;
+      lastOutActivity : Time;
+      runTime : Time;
+      ethTCPConnected : Bool;
+      mqttErrorCode : Int;
+      recPublishPacketID : Int;
+      tcp_sendBufferFull : Bool;
+   END_STRUCT;
+
+
+BEGIN
+   _state := -1;
+   mqttErrorCode := 0;
+   recPublishPacketID := 0;
+   tcp_sendBufferFull := FALSE;
+
+END_DATA_BLOCK
+

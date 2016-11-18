@@ -1,0 +1,84 @@
+﻿FUNCTION "Unixtime" : DWord
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   VAR_TEMP 
+      leapyears : Int;
+      days_from_1970 : DInt;
+      days_from_BeginOfYear : Array[0..11] of Int;
+      l_unixtime : DInt;
+      sfc1_ret_val : Int;
+      CDT_systemtime : Date_And_Time;
+      systemtime AT CDT_systemtime : Struct
+         year_CDT : Byte;
+         month_CDT : Byte;
+         day_CDT : Byte;
+         hour_CDT : Byte;
+         minute_CDT : Byte;
+         second_CDT : Byte;
+      END_STRUCT;
+      year : Int;
+      month : Int;
+      day : Int;
+      hour : Int;
+      minute : Int;
+      second : Int;
+   END_VAR
+
+
+BEGIN
+	#leapyears := 0;
+	#days_from_1970 := 0;
+	
+	// days of current month without leap day
+	
+	#days_from_BeginOfYear[0] := 0;
+	#days_from_BeginOfYear[1] := 31;
+	#days_from_BeginOfYear[2] := 59;
+	#days_from_BeginOfYear[3] := 90;
+	#days_from_BeginOfYear[4] := 120;
+	#days_from_BeginOfYear[5] := 151;
+	#days_from_BeginOfYear[6] := 181;
+	#days_from_BeginOfYear[7] := 212;
+	#days_from_BeginOfYear[8] := 243;
+	#days_from_BeginOfYear[9] := 273;
+	#days_from_BeginOfYear[10] := 304;
+	#days_from_BeginOfYear[11] := 334;
+	
+	
+	// read system time
+	#sfc1_ret_val := RD_SYS_T(OUT => #CDT_systemtime);
+	#year := BCD16_TO_INT(#systemtime.year_CDT) + 2000;
+	#month := BCD16_TO_INT(#systemtime.month_CDT);
+	#day := BCD16_TO_INT(#systemtime.day_CDT);
+	#hour := BCD16_TO_INT(#systemtime.hour_CDT);
+	#minute := BCD16_TO_INT(#systemtime.minute_CDT);
+	#second := BCD16_TO_INT(#systemtime.second_CDT);
+	
+	
+	// sum of leap years since 1979 (without current leap year)
+	#leapyears := ((#year - 1) - 1968) / 4
+	- ((#year - 1) - 1900) / 100
+	+ ((#year - 1) - 1600) / 400;
+	
+	
+	#days_from_1970 := (#year - 1970) * 365 + #leapyears
+	+ #days_from_BeginOfYear[#month] + #day - 1;
+	
+	IF ((#month > 2) AND ((#year MOD 4 = 0) AND ((#year MOD 100 <> 0) OR (#year MOD 400 = 0)))) THEN
+	    #days_from_1970 := #days_from_1970 + 1; // + leap day, if year is leap year
+	END_IF;
+	
+	// OUTPUT in s
+	#l_unixtime := #second + 60 * (#minute + 60 * (#hour + 24 * #days_from_1970));
+	
+	
+	// if error return 0
+	IF #sfc1_ret_val <> 0 THEN
+	    #Unixtime := 0;
+	ELSE
+	    #Unixtime := DINT_TO_DWORD(#l_unixtime);
+	END_IF;
+	
+	
+END_FUNCTION
+

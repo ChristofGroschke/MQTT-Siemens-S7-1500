@@ -1,0 +1,553 @@
+﻿(*
+    TODO:
+    - connect method: handle reset of message ID according to cleanSessio flag
+
+*)
+
+FUNCTION "mqttGetNextMessageID" : Int
+TITLE = 'MQTT Message ID Generator'
+{ S7_Optimized_Access := 'TRUE' }
+AUTHOR : Brand
+VERSION : 1.0
+
+BEGIN
+	  "mqttData".nextMsgId := "mqttData".nextMsgId + 1;
+	  
+	  IF ("mqttData".nextMsgId <= 0) THEN
+	    "mqttData".nextMsgId := 1;
+	  END_IF;
+	  
+	  #mqttGetNextMessageID := "mqttData".nextMsgId;
+	  
+END_FUNCTION
+
+
+
+(*
+   ***********************************************************************
+   MQtt connect method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html, section 3.1 CONNECT
+   ***********************************************************************
+*)
+FUNCTION "mqttCONNECT" : Void
+TITLE = 'MQTT Connect Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      clientID : String;
+      withUsername : Bool;
+      withPassword : Bool;
+      cleanSession : Bool;
+      withWill : Bool;
+      willQos : Int;
+      willRetain : Bool;
+      willTopic : String;
+      willPayload : Any;
+      willPayloadLength : Int;
+      username : String;
+      password : String;
+   END_VAR
+
+   VAR_TEMP 
+      l_clientID : String[23];
+      l_username : String[50];
+      l_password : String[50];
+      l_willTopic : String[50];
+      result : Int;
+      length : Int;
+      fixedHeader : Byte;
+      ptrWillPayload : Any;
+      structWillPtrPayload AT ptrWillPayload : "UDT_STRUCTANYPTR";
+      ret : Int;
+      i : Int;
+      j : Int;
+      d : Array[0..6] of Byte;
+      llen : Int;
+      _len : Int;
+   END_VAR
+
+
+BEGIN
+	#l_clientID := #clientID;
+	#l_username := #username;
+	#l_password := #password;
+	
+	#result := 0;
+	
+	"mqttData".nextMsgId := 1; // set next message ID to 1 because we started a new clean(!) session
+	
+	#length := 5;
+	#d[0] := B#16#00;
+	#d[1] := B#16#04;
+	#d[2] := B#16#4D;
+	#d[3] := B#16#51;
+	#d[4] := B#16#54;
+	#d[5] := B#16#54;
+	#d[6] := B#16#04;
+	
+	// header
+	FOR #j := 0 TO 6 DO
+	  "mqttData".buffer[#length] := #d[#j];
+	  #length := #length + 1;
+	END_FOR;
+	
+	// Set Flags for username and password, cleanSession,
+	"mqttData".buffer[#length] := 0;
+	"mqttData".buffer[#length] := "mqttData".buffer[#length] OR SHL(IN := BOOL_TO_BYTE(#withUsername), N := 7) OR SHL(IN := BOOL_TO_BYTE(#withPassword), N := 6) OR SHL(IN := BOOL_TO_BYTE(#cleanSession), N := 1);
+	
+	// set all will flags and will qos if with will
+	IF #withWill = true THEN
+	  "mqttData".buffer[#length] := "mqttData".buffer[#length] OR SHL(IN := BOOL_TO_BYTE(#willRetain), N := 5) OR SHL(IN := BOOL_TO_BYTE(#withWill), N := 2);
+	  IF #willQos = "mqttGlobals".MQTTQOS1 THEN
+	    "mqttData".buffer[#length] := "mqttData".buffer[#length] OR SHL(IN := BOOL_TO_BYTE(true), N := 3);
+	  END_IF;
+	  IF #willQos = "mqttGlobals".MQTTQOS2 THEN
+	    "mqttData".buffer[#length] := "mqttData".buffer[#length] OR SHL(IN := BOOL_TO_BYTE(true), N := 4);
+	  END_IF;
+	END_IF;
+	
+	#length := #length + 1;
+	
+	// timeout - TIME_TO_DINT gives ms
+	"mqttData".buffer[#length] := DWORD_TO_BYTE(SHR(IN := DINT_TO_DWORD(TIME_TO_DINT("mqttGlobals".MQTT_KEEPALIVE) / 1000), N := 8));
+	#length := #length + 1;
+	"mqttData".buffer[#length] := DINT_TO_BYTE(TIME_TO_DINT("mqttGlobals".MQTT_KEEPALIVE) / 1000);
+	#length := #length + 1;
+	
+	#length := "mqttWriteString"(str := #l_clientID,
+	                           pos := #length);
+	
+	
+	IF #withWill = true THEN
+	  // copy will topic to buffer
+	  #l_willTopic := #willTopic;
+	  
+	  #length := "mqttWriteString"(str := #l_willTopic,
+	                             pos := #length);
+	  
+	  // copy payload to buffer
+	  //ptrBuffer := mqttData.buffer[length];
+	  #ptrWillPayload := #willPayload;
+	  
+	  IF #willPayloadLength > 0 THEN
+	    FOR #i := 0 TO #willPayloadLength - 1 DO
+	      #ret := BLKMOV(SRCBLK := #ptrWillPayload, DSTBLK => "mqttData".buffer[#length]);
+	      // what is this?!
+	      IF #ret <> 0 THEN
+	        //m23.2 := true;
+	        //return
+	        ;
+	      END_IF;
+	      #length := #length + 1;
+	      #structWillPtrPayload.ByteAddressLSB := INT_TO_WORD(WORD_TO_INT(#structWillPtrPayload.ByteAddressLSB) + 8);
+	    END_FOR;
+	  ELSE
+	    // if no will payload (willPayloadLength=0) we have to set the two payload length bytes to 0
+	    "mqttData".buffer[#length] := 0;
+	    #length := #length + 1;
+	    "mqttData".buffer[#length] := 0;
+	    #length := #length + 1;
+	  END_IF;
+	END_IF;
+	
+	// username
+	IF #withUsername = true THEN
+	  
+	  #length := "mqttWriteString"(str := #l_username,
+	                             pos := #length);
+	END_IF;
+	// password
+	IF #withPassword = true THEN
+	  #length := "mqttWriteString"(str := #l_password,
+	                             pos := #length);
+	END_IF;
+	
+	// set package type in header
+	#fixedHeader := INT_TO_BYTE("mqttGlobals".MQTTCONNECT);
+	
+	// write connect header
+	"mqttWrite"(header := #fixedHeader, length := #length-5);
+	
+	
+	"mqttData".lastInActivity := "mqttData".runTime;
+	"mqttData".lastOutActivity := "mqttData".lastInActivity;
+	
+	"mqttData"._state := "mqttGlobals".MQTT_CONNECTING;
+END_FUNCTION
+(**************************************************************)
+
+
+(* 
+   **********************************************************************************
+   MQtt connect method - simple version for convinience usage
+   **********************************************************************************
+*)
+FUNCTION "mqttSimpleCONNECT" : Void
+TITLE = 'MQTT Connect Function (basic parameters)'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      clientID : String;
+      cleanSession : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      l_clientID : String[23];
+      l_cleanSession : Bool;
+   END_VAR
+
+
+BEGIN
+	  #l_clientID := #clientID;
+	  #l_cleanSession := #cleanSession;
+	  
+	  "mqttCONNECT"(clientID := #l_clientID,
+	                withUsername := false,
+	                withPassword := false,
+	                cleanSession := #l_cleanSession,
+	                withWill := false,
+	                willQos := 0,
+	                willRetain := 0,
+	                willTopic := '',
+	                willPayload := NULL,
+	                willPayloadLength := 0,
+	                username := '',
+	                password := '');
+	  
+END_FUNCTION
+(**************************************************************)
+
+
+(*
+   **********************************************************************************
+   MQtt disconnect method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+   Section 3.14 DISCONNECT - disconnect notification
+   **********************************************************************************
+*)
+FUNCTION "mqttDISCONNECT" : Void
+TITLE = 'MQTT Disconnect Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+
+BEGIN
+	  "mqttData".buffer[0] := INT_TO_BYTE("mqttGlobals".MQTTDISCONNECT);
+	  "mqttData".buffer[1] := 0;
+	  "mqttSendTCP"(offset := 0,
+	                size := 2);
+	  "mqttData".lastOutActivity := "mqttData".runTime;
+	  "mqttData"._state := "mqttGlobals".MQTT_DISCONNECTED;
+	  
+END_FUNCTION
+
+
+(*
+   **********************************************************************************
+   MQtt subscribe method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+   Section 3.8 PUBLISH - subscribe message
+   **********************************************************************************
+*)
+FUNCTION "mqttSUBSCRIBE" : Void
+TITLE = 'MQTT Subscribe Function'
+{ S7_Optimized_Access := 'TRUE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      topic : String;
+      topicQos : Int;   // QoS Level 0,1,2
+   END_VAR
+
+   VAR_TEMP 
+      length : Int;
+      l_topic : String[50];
+      thisMessageID : Int;
+   END_VAR
+
+
+BEGIN
+	
+	// if there's no MQTT connection return
+	IF "mqttData"._state = "mqttGlobals".MQTT_DISCONNECTED THEN
+	  RETURN;
+	END_IF;
+	
+	#l_topic := #topic;
+	
+	// check if topic is not longer than 119 bytes
+	IF (128 < (9 + LEN(#l_topic))) THEN
+	  RETURN;
+	END_IF;
+	
+	#length := 5;
+	
+	// set message ID
+	#thisMessageID := "mqttGetNextMessageID"();
+	"mqttData".buffer[#length] := DWORD_TO_BYTE(SHR(IN := INT_TO_DWORD(#thisMessageID), N := 8));
+	#length := #length + 1;
+	"mqttData".buffer[#length] := INT_TO_BYTE(#thisMessageID) AND B#16#FF;
+	#length := #length + 1;
+	
+	// set topic                
+	#length := "mqttWriteString"(str := #l_topic, pos := #length);
+	
+	// set topic qos
+	"mqttData".buffer[#length] := INT_TO_BYTE(#topicQos);
+	#length := #length + 1;
+	
+	// write header and send message
+	"mqttWrite"(header := INT_TO_BYTE("mqttGlobals".MQTTSUBSCRIBE),
+	            length := #length - 5);
+END_FUNCTION
+(**************************************************************)
+
+
+(*
+   **********************************************************************************
+   MQtt unsubscribe method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+   Section 3.8 UNSUBSCRIBE - unsubscribe from topics
+   **********************************************************************************
+*)
+FUNCTION "mqttUNSUBSCRIBE" : Void
+TITLE = 'MQTT Unsubscribe Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+   VAR_INPUT 
+      topic : String;
+   END_VAR
+
+   VAR_TEMP 
+      length : Int;
+      l_topic : String[50];
+      thisMessageID : Int;
+      fixedHeader : Byte;
+   END_VAR
+
+
+BEGIN
+	
+	// if there's no MQTT connection return
+	IF "mqttData"._state = "mqttGlobals".MQTT_DISCONNECTED THEN
+	  RETURN;
+	END_IF;
+	
+	#l_topic := #topic;
+	
+	// check if topic is not longer than 119 bytes
+	IF (128 < (9 + LEN(#l_topic))) THEN
+	  RETURN;
+	END_IF;
+	
+	#length := 5;
+	
+	// set message ID
+	#thisMessageID := "mqttGetNextMessageID"();
+	"mqttData".buffer[#length] := DWORD_TO_BYTE(SHR(IN := INT_TO_DWORD(#thisMessageID), N := 8));
+	#length := #length + 1;
+	"mqttData".buffer[#length] := INT_TO_BYTE(#thisMessageID) AND B#16#FF;
+	#length := #length + 1;
+	
+	// set topic        
+	#length := "mqttWriteString"(str := #l_topic, pos := #length);
+	
+	#fixedHeader := INT_TO_BYTE("mqttGlobals".MQTTUNSUBSCRIBE);
+	// Set Header Flags for duplicates, qos level and retain
+	#fixedHeader := #fixedHeader OR SHL(IN := BOOL_TO_BYTE(true), N := 1);
+	
+	// write header and send message
+	"mqttWrite"(header := #fixedHeader,
+	            length := #length - 5);
+END_FUNCTION
+(**************************************************************)
+
+
+(* 
+   **********************************************************************************
+   MQtt publish method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+   Section 3.3 PUBLISH - publish message
+   RETURN: message ID (if Qos1 or Qos2 was selected, else 0)
+   **********************************************************************************
+*)
+FUNCTION "mqttPUBLISH" : Int
+TITLE = MQTT Publish Function
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      topic : String;
+      messageid : Int;
+      payload : Any;
+      payloadLength : Int;
+      qos : Int;
+      "retain" : Bool;
+      duplicate : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      length : Int;
+      i : Int;
+      fixedHeader : Byte;
+      holdstring : String[50];
+      thisMessageID : Int;
+      tdata : Any;
+      pdata AT tdata : "UDT_STRUCTANYPTR";
+      ret : Int;
+      ptrBuffer : Any;
+      structPtrBuffer AT ptrBuffer : "UDT_STRUCTANYPTR";
+      ptrPayload : Any;
+      structPtrPayload AT ptrPayload : "UDT_STRUCTANYPTR";
+   END_VAR
+
+
+BEGIN
+	// set return value (message ID) to 0
+	#mqttPUBLISH := 0;
+	
+	// if there's no MQTT connection return an error code
+	IF "mqttData"._state = "mqttGlobals".MQTT_DISCONNECTED THEN
+	    #mqttPUBLISH := -1;
+	    RETURN;
+	END_IF;
+	
+	// Fixed header, byte 1
+	// +--------+---+-----+---+---+----------+-----+-----+--------+
+	// |bit     | 7 |  6  | 5 | 4 |     3    |  2  |  1  |    0   |
+	// +--------+---+-----+---+---+----------+-----+-----+--------+
+	// |byte 1  | Message Type(3) | DUP Flag | QoS level | RETAIN |
+	// +--------+-----------------+----------+-----------+--------+
+	
+	// set package type in header
+	#fixedHeader := INT_TO_BYTE("mqttGlobals".MQTTPUBLISH);
+	// Set Header Flags for duplicates, qos level and retain
+	#fixedHeader := #fixedHeader OR SHL(IN := BOOL_TO_BYTE(#duplicate), N := 3) OR SHL(IN := INT_TO_BYTE(#qos), N := 1) OR BOOL_TO_BYTE(#retain);
+	
+	// Fixed header, byte 2
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bit     | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bytes 2..4|   Remaining Length          |
+	// +--------+-------------------------------+
+	
+	// Variable header, topic
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bit     | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+	// +--------+---+---+---+---+---+---+---+---+
+	// |byte    |           Topic length MSB    |
+	// +~~~~~~~~|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+	// |byte    |           Topic length LSB    |
+	// +~~~~~~~~|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bit     | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bytes    |           Topic              |
+	// +~~~~~~~~|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+	
+	// point to buffer area in front of fixed header (5 bytes)
+	// copy topic to buffer
+	#holdstring := #topic;
+	#length := 5;
+	
+	#length := "mqttWriteString"(str := #holdstring, pos := #length);
+	
+	// MessageID  
+	// Variable header, byte 9
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bit     | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+	// +--------+---+---+---+---+---+---+---+---+           
+	// |byte    |       Message ID LSB (0)      |
+	// +--------+-------------------------------+ 
+	// |byte    |       Message ID LSB (10)     |
+	// +--------+-------------------------------+
+	
+	// set MessageID if qos level 1 or 2
+	IF (#qos = "mqttGlobals".MQTTQOS1) OR (#qos = "mqttGlobals".MQTTQOS2) THEN
+	    IF #messageid > 0 THEN
+	        #thisMessageID := #messageid;
+	    ELSE
+	        #thisMessageID := "mqttGetNextMessageID"();
+	    END_IF;
+	    
+	    // insert message ID
+	    "mqttData".buffer[#length] := DWORD_TO_BYTE(SHR(IN := INT_TO_DWORD(#thisMessageID), N := 8));
+	    #length := #length + 1;
+	    "mqttData".buffer[#length] := INT_TO_BYTE(#thisMessageID) AND B#16#FF;
+	    #length := #length + 1;
+	    
+	    #mqttPUBLISH := #thisMessageID;
+	END_IF;
+	
+	// Payload
+	// Variable header, byte 11...
+	// +--------+---+---+---+---+---+---+---+---+
+	// |bit     | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+	// +--------+---+---+---+---+---+---+---+---+           
+	// |bytes   |           Payload             |
+	// +~~~~~~~~|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+  
+	
+	// copy payload to buffer
+	//ptrBuffer := mqttData.buffer[length];
+	#ptrPayload := #payload;
+	
+	IF #payloadLength > 0 THEN
+	    FOR #i := 0 TO #payloadLength - 1 DO
+	        #ret := BLKMOV(SRCBLK := #ptrPayload, DSTBLK => "mqttData".buffer[#length]);
+	        // what is this?!
+	        IF #ret <> 0 THEN
+	            //m23.2 := true;
+	            //return
+	            ;
+	        END_IF;
+	        #length := #length + 1;
+	        #structPtrPayload.ByteAddressLSB := INT_TO_WORD(WORD_TO_INT(#structPtrPayload.ByteAddressLSB) + 8);
+	    END_FOR;
+	END_IF;
+	
+	// copy header information (includes remaining length calculation)
+	// and trigger tcpsend
+	"mqttWrite"(header := #fixedHeader,
+	            length := #length - 5);
+END_FUNCTION
+(**************************************************************)
+
+
+(* 
+   **********************************************************************************
+   MQtt PUBACK method
+   Please refer to http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
+   Section 3.4 PUBACK - Publish acknowledgement
+   RETURN: none
+   **********************************************************************************
+*)
+FUNCTION "mqttPUBACK" : Void
+TITLE = 'MQTT Publish Acknowledge QoS1 Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+   VAR_INPUT 
+      packetIdMSB : Byte;
+      packetIdLSB : Byte;
+   END_VAR
+
+
+BEGIN
+	  "mqttData".buffer[0] := INT_TO_BYTE("mqttGlobals".MQTTPUBACK);
+	  "mqttData".buffer[1] := 2;
+	  "mqttData".buffer[2] := #packetIdMSB;
+	  "mqttData".buffer[3] := #packetIdLSB;
+	  "mqttSendTCP"(offset := 0,
+	                size := 4);
+	  "mqttData".lastOutActivity := "mqttData".runTime;
+	  
+END_FUNCTION
+(**************************************************************)

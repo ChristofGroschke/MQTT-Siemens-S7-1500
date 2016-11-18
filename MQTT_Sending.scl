@@ -1,0 +1,118 @@
+﻿FUNCTION "mqttSendTCP" : Void
+TITLE = 'MQTT mqttSendTCP Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      offset : Int;
+      size : Int;
+   END_VAR
+
+   VAR_TEMP 
+      i : Int;
+   END_VAR
+
+
+BEGIN
+	IF "mqttData".sendSize + #size <= "mqttGlobals".TCP_SENDBUFFERSIZE THEN
+	    FOR #i := 0 TO #size - 1 DO
+	      "mqttData".tcpSendBuf[MIN(IN1 := (#i + "mqttData".sendSize), IN2 := "mqttGlobals".TCP_SENDBUFFERSIZE)] := "mqttData".buffer[#offset + #i];
+	    END_FOR;
+	    "mqttData".sendSize := "mqttData".sendSize + #size;
+	    "mqttData".reqSend := true;
+	  ELSE
+	    "mqttData".tcp_sendBufferFull := true;
+	  END_IF;
+	  
+END_FUNCTION
+(**************************************************************)
+
+FUNCTION "mqttWrite" : Void
+TITLE = 'MQTT mqttWrite Helper Function'
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      header : Byte;
+      length : Int;
+   END_VAR
+
+   VAR_TEMP 
+      lenBuf : Array[0..3] of Byte;
+      llen : Int;
+      digit : Byte;
+      digit_bitview AT digit : Array[0..7] of Bool;
+      pos : Int;
+      rc : Int;
+      _len : Int;
+      i : Int;
+   END_VAR
+
+
+BEGIN
+	#llen := 0;
+	#pos := 0;
+	#_len := #length;
+	REPEAT
+	  #digit := INT_TO_BYTE(#_len MOD 128);
+	  #_len := #_len / 128;
+	  IF (#_len > 0) THEN
+	    #digit_bitview[7] := 1; // digit |= 0x80;
+	  END_IF;
+	  #lenBuf[#pos] := #digit;
+	  #pos := #pos + 1;
+	  #llen := #llen + 1;
+	UNTIL (#_len <= 0) // do..while(len>0)
+	END_REPEAT;
+	"mqttData".buffer[4 - #llen] := #header;
+	FOR #i := 0 TO #llen - 1 DO
+	  "mqttData".buffer[5 - #llen + #i] := #lenBuf[#i];
+	END_FOR;
+	"mqttSendTCP"(offset := 4 - #llen,
+	              size := #length + 1 + #llen);
+	"mqttData".lastOutActivity := "mqttData".runTime;
+END_FUNCTION
+(**************************************************************)
+
+FUNCTION "mqttWriteString" : Int
+TITLE = MQTT mqttWriteString Helper Function
+{ S7_Optimized_Access := 'FALSE' }
+AUTHOR : Brand
+VERSION : 1.0
+//ported by Groschke to TIA V13
+   VAR_INPUT 
+      str : String;
+      _str AT str : Struct
+         length : Byte;
+         act_length : Byte;
+         str : Array[0..253] of Byte;
+      END_STRUCT;
+      pos : Int;
+   END_VAR
+
+   VAR_TEMP 
+      newPos : Int;
+      i : DInt;
+      j : Int;
+   END_VAR
+
+
+BEGIN
+	#newPos := #pos + 2;
+	#i := 0;
+	
+	FOR #j := 1 TO BYTE_TO_INT(#_str.act_length) DO
+	    "mqttData".buffer[#newPos] := #_str.str[#j];
+	    #newPos := #newPos + 1;
+	    #i := #i + 1;
+	END_FOR;
+	
+	"mqttData".buffer[#newPos - 2 - #i] := DWORD_TO_BYTE(SHR(IN := DINT_TO_DWORD(#i), N := 8));
+	"mqttData".buffer[#newPos - 1 - #i] := DINT_TO_BYTE(#i);
+	
+	#mqttWriteString := #newPos;
+END_FUNCTION
+
+
