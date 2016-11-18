@@ -1,7 +1,7 @@
 # MQTT-Siemens-S7-1500
 MQTT library block ported to Siemens S7-1500 PLC in SCL
 
-More Information on the Repos of the creators.
+More information on the repos of the creators.
 
 Take a look here: 
 
