@@ -69,16 +69,7 @@ VERSION : 1.0
    VAR_TEMP 
       i : Int;
       intTemp : Int;
-      TOP_SI : Struct
-         EV_CLASS : Byte;
-         EV_NUM : Byte;
-         PRIORITY : Byte;
-         NUM : Byte;
-         TYP2_3 : Byte;
-         TYP1 : Byte;
-         ZI1 : Word;
-         ZI2_3 : DWord;
-      END_STRUCT;
+      TOP_SI {OriginalPartName := 'SI_classic'; LibVersion := '1.0'} : SI_classic;
       START_UP_SI {OriginalPartName := 'SI_classic'; LibVersion := '1.0'} : SI_classic;
       tmpPacketID : Int;
       structTmpPacketId AT tmpPacketID : Struct
@@ -133,7 +124,7 @@ BEGIN
 	
 	(* Check IF CPU had a reset, trigger network reinitialization on reset *)
 	#intTemp := RD_SINFO(TOP_SI => #TOP_SI, START_UP_SI => #START_UP_SI);
-	IF #START_UP_SI.EV_NUM <> 3 THEN
+	IF #TOP_SI.EV_NUM <> 3 THEN
 	  #tcpState := #TCP_STATE_UNINITIALIZED;
 	  "mqttData".ethTCPConnected := false;
 	  "mqttData"._state := #MQTT_STATE_DISCONNECTED;
