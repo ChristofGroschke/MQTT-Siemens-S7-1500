@@ -79,16 +79,7 @@ VERSION : 1.0
          ZI1 : Word;
          ZI2_3 : DWord;
       END_STRUCT;
-      START_UP_SI : Struct
-         EV_CLASS : Byte;
-         EV_NUM : Byte;
-         PRIORITY : Byte;
-         NUM : Byte;
-         TYP2_3 : Byte;
-         TYP1 : Byte;
-         ZI1 : Word;
-         ZI2_3 : DWord;
-      END_STRUCT;
+      START_UP_SI {OriginalPartName := 'SI_classic'; LibVersion := '1.0'} : SI_classic;
       tmpPacketID : Int;
       structTmpPacketId AT tmpPacketID : Struct
          byteLSB : Byte;
@@ -141,12 +132,12 @@ VERSION : 1.0
 BEGIN
 	
 	(* Check IF CPU had a reset, trigger network reinitialization on reset *)
-	//#intTemp := RD_SINFO(TOP_SI => #TOP_SI, START_UP_SI => #START_UP_SI);
-	//IF #TOP_SI.EV_NUM <> 3 THEN
-	//  #tcpState := #TCP_STATE_UNINITIALIZED;
-	//  "mqttData".ethTCPConnected := false;
-	//  "mqttData"._state := #MQTT_STATE_DISCONNECTED;
-	//END_IF;
+	#intTemp := RD_SINFO(TOP_SI => #TOP_SI, START_UP_SI => #START_UP_SI);
+	IF #START_UP_SI.EV_NUM <> 3 THEN
+	  #tcpState := #TCP_STATE_UNINITIALIZED;
+	  "mqttData".ethTCPConnected := false;
+	  "mqttData"._state := #MQTT_STATE_DISCONNECTED;
+	END_IF;
 	
 	
 	(* 
@@ -231,7 +222,7 @@ BEGIN
 	      "mqttData".ethTCPConnected := true;
 	    END_IF;
 	    IF #netcmd_error THEN
-	        #cntrl_lastErrStatus := #netcmd_status;
+	      #cntrl_lastErrStatus := #netcmd_status;
 	      #tcpState := #TCP_STATE_DISCONNECTED;
 	    END_IF;
 	    
@@ -410,7 +401,7 @@ BEGIN
 	
 	IF #netcmd_datareceived THEN
 	  IF "mqttData".RecBufFull THEN
-	      "RecBufFull" := true;
+	    "RecBufFull" := true;
 	  ELSE
 	    "mqttData".tcpRecBuf["mqttData".pRec] := #tcpRecByte;
 	    "mqttData".pRec := "mqttData".pRec + 1;
@@ -619,6 +610,7 @@ BEGIN
 	    END_CASE; //intState
 	    
 	END_CASE; // mqttData._state
+	
 	
 END_FUNCTION_BLOCK
 
