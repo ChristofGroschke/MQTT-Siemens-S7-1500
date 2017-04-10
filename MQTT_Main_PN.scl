@@ -64,6 +64,7 @@ VERSION : 1.0
       NET_SEND {OriginalPartName := 'T__SEND'; LibVersion := '4.0'} : TSEND;
       NET_RCV {OriginalPartName := 'T__RCV'; LibVersion := '4.0'} : TRCV;
       NET_CONFIG {OriginalPartName := 'TCON_IP_v4'; LibVersion := '1.0'} : TCON_IP_v4;
+      BUSY_TIMER {OriginalPartName := 'IEC_TIMER'; LibVersion := '1.0'} : TON_TIME;
    END_VAR
 
    VAR_TEMP 
@@ -148,6 +149,11 @@ BEGIN
 	    // *** PN CODE ****
 	    
 	    // Load IP parameters to NET_CONFIG DB variables for usage in TCON
+	    
+	    #NET_CONFIG.InterfaceId := 64;
+	    #NET_CONFIG.ConnectionType := 16#11;
+	    #NET_CONFIG.LocalPort := 2000;
+	    #NET_CONFIG.ID := 1;
 	    #NET_CONFIG.RemoteAddress.ADDR[1] := INT_TO_BYTE(#ipBlock1);
 	    #NET_CONFIG.RemoteAddress.ADDR[2] := INT_TO_BYTE(#ipBlock2);
 	    #NET_CONFIG.RemoteAddress.ADDR[3] := INT_TO_BYTE(#ipBlock3);
@@ -315,14 +321,29 @@ BEGIN
 	    TCP/IP Sending and Receiving
 	    ******************************
 	*)
-	IF NOT (#tcpState = #TCP_STATE_CONNECTED) THEN
-	  RETURN;
+	IF NOT (#tcpState = #TCP_STATE_CONNECTED) THEN // stop if there's no tcp connection 
+	    #snd_busy := false;
+	    #act_send := false;
+	    RETURN;
 	END_IF;
 	
 	(* TCP SENDING *)
 	IF ("mqttData".reqSend AND NOT #snd_busy) THEN
-	  "mqttData".reqSend := false;
-	  #act_send := true;
+	    "mqttData".reqSend := false;
+	    #act_send := true;
+	END_IF;
+	
+	IF "mqttData".reqSend AND #snd_busy THEN
+	(* Just a try to stop the process from deadlocking when TCP connection went down *)
+	    #BUSY_TIMER(IN := true,
+	                PT := T#500MS);
+	    
+	    IF #BUSY_TIMER.Q THEN
+	        #snd_busy := false; // simple reset busy because something went clearly wrong here ...
+	        #BUSY_TIMER(IN := false,
+	                    PT := T#500MS);
+	    END_IF;
+	    
 	END_IF;
 	
 	
