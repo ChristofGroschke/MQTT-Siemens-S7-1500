@@ -124,12 +124,12 @@ VERSION : 1.0
 BEGIN
 	
 	(* Check IF CPU had a reset, trigger network reinitialization on reset *)
-	#intTemp := RD_SINFO(TOP_SI => #TOP_SI, START_UP_SI => #START_UP_SI);
-	IF #TOP_SI.EV_NUM <> 3 THEN
-	  #tcpState := #TCP_STATE_UNINITIALIZED;
-	  "mqttData".ethTCPConnected := false;
-	  "mqttData"._state := #MQTT_STATE_DISCONNECTED;
-	END_IF;
+//	#intTemp := RD_SINFO(TOP_SI => #TOP_SI, START_UP_SI => #START_UP_SI);
+//	IF #TOP_SI.EV_NUM <> 3 THEN
+//	  #tcpState := #TCP_STATE_UNINITIALIZED;
+//	  "mqttData".ethTCPConnected := false;
+//	  "mqttData"._state := #MQTT_STATE_DISCONNECTED;
+//	END_IF;
 	
 	
 	(* 
