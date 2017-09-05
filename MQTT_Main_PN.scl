@@ -153,7 +153,7 @@ BEGIN
 	    #NET_CONFIG.InterfaceId := 64;
 	    #NET_CONFIG.ConnectionType := 16#11;
 	    #NET_CONFIG.LocalPort := 2000;
-	    #NET_CONFIG.ID := 1;
+	    #NET_CONFIG.ID := INT_TO_WORD(#connectionID);
 	    #NET_CONFIG.RemoteAddress.ADDR[1] := INT_TO_BYTE(#ipBlock1);
 	    #NET_CONFIG.RemoteAddress.ADDR[2] := INT_TO_BYTE(#ipBlock2);
 	    #NET_CONFIG.RemoteAddress.ADDR[3] := INT_TO_BYTE(#ipBlock3);
@@ -245,7 +245,7 @@ BEGIN
 	             ,
 	             ID := INT_TO_WORD(#connectionID) // IN: WORD
 	             ,
-	             LEN := 0 // IN: INT
+	             LEN := 1 // IN: INT
 	             ,
 	             DATA := #tcpRecByte // INOUT: ANY
 	    );
@@ -394,7 +394,7 @@ BEGIN
 	         ,
 	         ID := INT_TO_WORD(#connectionID) // IN: WORD
 	         ,
-	         LEN := #netcmd_datalength // IN: INT
+	         LEN := 1 // IN: INT
 	         ,
 	         DATA := #tcpRecByte // INOUT: ANY
 	);
@@ -553,6 +553,7 @@ BEGIN
 	                  #payload[#i] := "mqttData".buffer[#paylPos + #i];
 	                END_FOR;
 	                #payloadSize := #paylSize;
+					#callbackPacketType := "mqttGlobals".MQTTPUBLISH;
 	                #callback := true;
 	                
 	                // Check if the Publish messag has QoS = 1, if yes then send PUBACK response
