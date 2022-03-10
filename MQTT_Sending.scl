@@ -104,7 +104,7 @@ BEGIN
 	#i := 0;
 	
 	FOR #j := 1 TO BYTE_TO_INT(#_str.act_length) DO
-	    "mqttData".buffer[#newPos] := #_str.str[#j];
+	    "mqttData".buffer[#newPos] := #_str.str[#j - 1];
 	    #newPos := #newPos + 1;
 	    #i := #i + 1;
 	END_FOR;
